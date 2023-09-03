@@ -13,15 +13,21 @@ public class UiManager : MonoBehaviour
     [Header("입력 디버그")]
     [SerializeField] Image wKey, aKey, sKey, dKey;
     Color yellowGreen = new Color(0.52f, 0.82f, 0);
+
+    [Header("입력 디버그")]
+    [SerializeField] Transform velocityUI;
+    [SerializeField] GameObject velocityPlus;
+    [SerializeField] float velocityUIMuliy;
     private void Awake()
     {
         instance = this;
+        Application.targetFrameRate = 60;
     }
 
     static public void PlayerAngleUI(float angle) => instance._PlayerAngleUI(angle);
     void _PlayerAngleUI(float angle)
     {
-        playerAngleText.text = angle.ToString("f1");
+        playerAngleText.text = angle.ToString("f1") + "\n<size=-10> Angle</size>";
     }
 
     static public void PlayerInputUI(int w, int a, int s, int d) => instance._PlayerInputUI(w, a, s, d);
@@ -82,6 +88,27 @@ public class UiManager : MonoBehaviour
             case 2:
                 dKey.color = Color.yellow;
                 break;
+        }
+    }
+
+    static public void PlayerVelocityUI(float velcity) => instance.playerVelocityUI(velcity);
+    void playerVelocityUI(float velcity)
+    {
+        velcity *= velocityUIMuliy;
+        if (velcity < -0.7f)
+        {
+            velocityUI.localScale = new Vector2(1, -0.7f);
+            velocityPlus.SetActive(true);
+        }
+        else if (velcity > 0.3f)
+        {
+            velocityUI.localScale = new Vector2(1, 0.3f);
+            velocityPlus.SetActive(false);
+        }
+        else
+        {
+            velocityUI.localScale = new Vector2(1, velcity);
+            velocityPlus.SetActive(false);
         }
     }
 }

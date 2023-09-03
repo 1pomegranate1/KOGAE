@@ -1,9 +1,6 @@
-using System;
-using System.Collections;
 using System.Collections.Generic;
-using System.Runtime.InteropServices.WindowsRuntime;
-using System.Timers;
 using Unity.VisualScripting;
+using UnityEditor.Rendering;
 using UnityEngine;
 
 [System.Serializable]
@@ -16,38 +13,58 @@ public class Player : MonoBehaviour
 {
     [Header("컴포넌트")]
     [SerializeField] Rigidbody2D rb;
+    [SerializeField] SpriteRenderer spriteRender;
+    [SerializeField] Animator anim;
     bool inputX_p, inputX_m, inputY_p, inputY_m;
     Camera mainCamera;
 
     [Header("입력")]
+    [SerializeField] float doubleClickTime;
     List<InputTimeLine> inputs = new List<InputTimeLine>();
     Dictionary<KeyCode, System.Action> doubleClickAction = new Dictionary<KeyCode, System.Action>();
-    [SerializeField] float doubleClickTime;
 
     [Header("이동")]
-    Vector2 inputVec;
     [SerializeField] float speed;
+    Vector2 inputVec;
+    bool playerLookRight;
+    float gravityScale;
 
     [Header("마우스")]
     Vector2 lookVec;
     float angle;
 
     [Header("점프")]
-    public int ableJumpCount;
     [SerializeField] int maxJumpCount;
+    public int ableJumpCount;
     [SerializeField] float jumpForce;
     [SerializeField] Vector2 footSize, footOffset;
     float jumpDelay;
     [SerializeField] float minJumpDelay;
+    bool onGround;
+    Transform groundTransform;
+    Vector2 groundOffset;
 
     [Header("대쉬")]
-    bool isDashing;
     [SerializeField] float dashForce;
+    bool isDashing;
+    Vector2 dashVelocity;
+    [SerializeField] float dashDrag;
+
+    [Header("벽잡기")]
+    [SerializeField] bool isWallHold;
+    [SerializeField] Transform handColiderHint;
+    [SerializeField] float targetWallSlideVelocity, wallSlideLerpMulti;
+    Transform holdedTransform;
+    [SerializeField] Vector2 handSize, handOffset;
+
+    [Header("애니메이션")]
+    [SerializeField] string currentState;
 
     // Start is called before the first frame update
     void Start()
     {
         mainCamera = Camera.main;
+        gravityScale = rb.gravityScale;
         DoubleClickSetup();
     }
 
@@ -55,10 +72,13 @@ public class Player : MonoBehaviour
     {
         FixedMove();
         Landing();
+        WallHold();
     }
     private void LateUpdate()
     {
         DoubleClickUpdate();
+        UiManager.PlayerVelocityUI(rb.velocity.y);
+        handColiderHint.localPosition = handOffset;
     }
     void Update()
     {
@@ -207,25 +227,53 @@ public class Player : MonoBehaviour
     }
     void FixedMove()
     {
+        if (isWallHold)
+        {
+            if (onGround)
+            {
+                isWallHold = false;
+            }
+            rb.gravityScale = 0;
+            TryStateChange("Grap");
+        }
+        else
+            rb.gravityScale = gravityScale;
+
         if (isDashing)
         {
-            rb.velocity = new Vector2(rb.velocity.x * 0.95f, rb.velocity.y);
+            TryStateChange("Run");
+            anim.SetFloat("runSpeed", Mathf.Abs(rb.velocity.x) / (speed * Time.fixedDeltaTime));
+            dashVelocity.x = Mathf.Lerp(dashVelocity.x, 0, Time.fixedDeltaTime * dashDrag);
+            rb.velocity = new Vector2(rb.velocity.x * 0.95f, rb.velocity.y) + dashVelocity;
+            Debug.Log(rb.velocity);
             if (rb.velocity.x >= -5f && rb.velocity.x <= 5f)
             {
                 isDashing = false;
             }
             return;
         }
-        float velocityY = rb.velocity.y;
+        else
+            anim.SetFloat("runSpeed", 1);
+
+        float velocityY = isWallHold ? Mathf.Lerp(rb.velocity.y, targetWallSlideVelocity, Time.fixedDeltaTime * wallSlideLerpMulti) : rb.velocity.y;
         if (inputVec.x != 0)
         {
+            if (isWallHold == false)
+                TryStateChange("Run");
             rb.velocity = new Vector2(
                 inputVec.x * speed * Time.fixedDeltaTime,
                 velocityY
                 );
+            if (rb.velocity.x > 0)
+                PlayerLookDirectionChange(true);
+            else
+                PlayerLookDirectionChange(false);   
         }
         else
+        {
+            TryStateChange("Idle");
             rb.velocity = Vector2.up * velocityY;
+        }
     }
     void Jump(bool stateCheck)
     {
@@ -241,7 +289,13 @@ public class Player : MonoBehaviour
             }
             return;
         }
-        if (ableJumpCount > 0)
+        if (isWallHold)
+        {
+            rb.velocity = new Vector2(rb.velocity.x, 3);
+            Dash(!playerLookRight, true);
+            return;
+        }
+        else if (ableJumpCount > 0)
         {
             if (ableJumpCount == maxJumpCount)
                 jumpDelay = minJumpDelay;
@@ -255,11 +309,17 @@ public class Player : MonoBehaviour
         angle = lookVec.ToDegree() - 90;
         UiManager.PlayerAngleUI(angle);
     }
-    public void Dash(bool isRight)
+    void PlayerLookDirectionChange(bool isRight)
+    {
+            playerLookRight = isRight;
+            spriteRender.flipX = !isRight;
+    }
+    public void Dash(bool isRight, bool isWallClimbing = false)
     {
         float velocityY = rb.velocity.y;
         print("Dash-" + (isRight ? "right" : "left"));
-        rb.velocity = new Vector2(dashForce * (isRight ? 1 : -1), velocityY);
+        rb.velocity = new Vector2(dashForce * (isRight ? 1 : -1) * (isWallClimbing ? 0.6f : 1), velocityY);
+        dashVelocity = new Vector2(dashForce * (isRight ? 1 : -1) * (isWallClimbing ? 0.6f : 1), velocityY);
         isDashing = true;
     }
     private void OnDrawGizmos()
@@ -270,22 +330,130 @@ public class Player : MonoBehaviour
     {
         if (jumpDelay > 0)
             return;
-        Collider2D[] underHits = Physics2D.OverlapCapsuleAll(rb.position + footOffset, footSize, CapsuleDirection2D.Horizontal, 0);
-        if (underHits.Length > 0) {
-            bool onGround = false;
-            for (int i = 0; i < underHits.Length; i++)
+        Collider2D[] groundHits = Physics2D.OverlapCapsuleAll(rb.position + footOffset, footSize, CapsuleDirection2D.Horizontal, 0);
+        if (groundHits.Length > 0) {
+            onGround = false;
+            for (int i = 0; i < groundHits.Length; i++)
             {
-                if (underHits[i].CompareTag("Floor"))
+                if(groundTransform != null)
                 {
-                    onGround = true;
-                    break;
+                    if (groundHits[i].transform == groundTransform)
+                    {
+                        onGround = true;
+                        break;
+                    }
+                }
+                else
+                {
+                    if (groundHits[i].CompareTag("Floor"))
+                    {
+                        groundTransform = groundHits[i].transform;
+                     
+                        onGround = true;
+                        break;
+                    }
                 }
             }
             if (onGround)
             {
+                /*
+                if (groundOffset != Vector2.zero)
+                {
+                    if (groundOffset != (Vector2)(groundTransform.position - transform.position))
+                    {
+                        transform.position -= (Vector3)(groundOffset - (Vector2)(groundTransform.position - transform.position));
+                    }
+                }
+                groundOffset = groundTransform.position - transform.position;
+                */
                 ableJumpCount = maxJumpCount;
             }
+            else
+            {
+                groundOffset = Vector2.zero;
+                groundTransform = null;
+            }
+        }
+    }
+    void WallHold()
+    {
+        if (isDashing)
+        {
+            if (rb.velocity.x > 0)
+            {
+                if (handOffset.x < 0) //오른쪽 보고있을때 손이 왼쪽에 있으면 반전
+                    handOffset.x = -handOffset.x;
+                spriteRender.flipX = false;
+            }
+            else
+            {
+                if (handOffset.x > 0) //왼쪽 보고있을때 손이 오른쪽에 있으면 반전
+                    handOffset.x = -handOffset.x;
+                spriteRender.flipX = true;
+            }
+        }
+        else
+        { 
+            if (playerLookRight)
+            {
+                if (handOffset.x < 0) //오른쪽 보고있을때 손이 왼쪽에 있으면 반전
+                    handOffset.x = -handOffset.x;
+            }
+            else
+            {
+                if (handOffset.x > 0) //왼쪽 보고있을때 손이 오른쪽에 있으면 반전
+                    handOffset.x = -handOffset.x;
+            }
+        }
 
+        Collider2D[] wallHits = Physics2D.OverlapCapsuleAll(rb.position + handOffset, handSize, CapsuleDirection2D.Vertical, 0);
+        if (wallHits.Length > 0)
+        {
+            if (holdedTransform == null) 
+            {
+                if ((playerLookRight ? inputX_p : inputX_m) && onGround == false || isDashing)
+                {
+                    for (int i = 0; i < wallHits.Length; i++)
+                    {
+                        if (wallHits[i].CompareTag("Floor"))
+                        {
+                            isWallHold = true;
+                            holdedTransform = wallHits[i].transform;
+                            break;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                bool holdEnd = true;
+                if ((playerLookRight ? inputX_p : inputX_m) || isDashing)
+                {
+                    for (int i = 0; i < wallHits.Length; i++)
+                    {
+                        if (wallHits[i].transform == holdedTransform)
+                        {
+                            holdEnd = false;
+                            break;
+                        }
+                    }
+                }
+                if(holdEnd == true)
+                {
+                    holdedTransform = null;
+                    isWallHold = false;
+                }
+            }
+        }
+    }
+    void TryStateChange(string nextState)
+    {
+        if (currentState == nextState)
+            return;
+        else
+        {
+            anim.Play(nextState);
+            currentState = nextState;
         }
     }
     private void Reset()

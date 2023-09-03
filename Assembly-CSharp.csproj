@@ -59,6 +59,7 @@
     <Compile Include="Assets\PlayerFoot.cs" />
     <Compile Include="Assets\Scripts\Utility.cs" />
     <Compile Include="Assets\Scripts\UiManager.cs" />
+    <Compile Include="Assets\Scripts\MoveWallTest.cs" />
     <Compile Include="Assets\Scripts\Player.cs" />
   </ItemGroup>
   <ItemGroup>
