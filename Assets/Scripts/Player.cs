@@ -244,7 +244,7 @@ public class Player : MonoBehaviour
             TryStateChange("Run");
             anim.SetFloat("runSpeed", Mathf.Abs(rb.velocity.x) / (speed * Time.fixedDeltaTime));
             dashVelocity.x = Mathf.Lerp(dashVelocity.x, 0, Time.fixedDeltaTime * dashDrag);
-            rb.velocity = new Vector2(rb.velocity.x * 0.95f, rb.velocity.y) + dashVelocity;
+            rb.velocity = new Vector2(rb.velocity.x * 0.95f, rb.velocity.y);
             Debug.Log(rb.velocity);
             if (rb.velocity.x >= -5f && rb.velocity.x <= 5f)
             {
